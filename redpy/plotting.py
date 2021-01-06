@@ -29,6 +29,7 @@ from matplotlib.transforms import offset_copy
 from bokeh.plotting import figure, output_file, save, gridplot
 from bokeh.models import HoverTool, ColumnDataSource, OpenURL, TapTool, Range1d, Div, Span
 from bokeh.models import Arrow, VeeHead, ColorBar, LogColorMapper, LogTicker, LabelSet
+from bokeh.models import Panel, Tabs, NumeralTickFormatter
 from bokeh.models.glyphs import Line, Quad
 from bokeh.layouts import column
 from bokeh.palettes import inferno, all_palettes
@@ -106,7 +107,7 @@ def plotTimelines(rtable, ftable, ttable, opt):
     plot_types = 'eqrate,fi,occurrence,longevity'.split(',')
     overview_plots = []
     recent_plots = []
-    
+    overview_panels = []
     
     # Create each of the subplots specified in the configuration file
     for p in plot_types:
@@ -115,7 +116,19 @@ def plotTimelines(rtable, ftable, ttable, opt):
             # Plot EQ Rates (Repeaters and Orphans)
             overview_plots.append(plot_eqrate(alltrigs, dt, opt.dybin))
             recent_plots.append(  plot_eqrate(alltrigs[dt>(max(alltrigs)-opt.recplot)], dt[dt>(max(alltrigs)-opt.recplot)], opt.hrbin/24))
+
+        elif p == 'eqamp':
+            overview_plots.append(plotAmplitude(dtT, ampT, dt, ampR, opt.dybin, min(alltrigs), type='Sum'))
+            recent_plots.append(plotAmplitude(dtT, ampT, dt, ampR, opt.hrbin/24,
+                                max(alltrigs)-opt.recplot, type='Sum'))
+            overview_plots.append(plotAmplitude(dtT, ampT, dt, ampR, opt.dybin, min(alltrigs), type='Average'))
             
+            recent_plots.append(plotAmplitude(dtT, ampT, dt, ampR, opt.hrbin/24,
+                                max(alltrigs)-opt.recplot, type='Average'))
+            
+            tabs=[Panel(child=overview_plots[-2], title='Sum'), Panel(child=overview_plots[-1], title='Average')]
+            overview_panels.append(Tabs(tabs=tabs))
+                    
         elif p == 'fi':
             # Plot Frequency Index
             overview_plots.append(plot_fi(dt, fi)) # Overview
@@ -156,7 +169,7 @@ def plotTimelines(rtable, ftable, ttable, opt):
 
     # Create output and save
     # gridplot_items should look like this: [[Div(text=...)],[panel1],[panel2],...]
-    gridplot_items = [[Div(text='<h1>{0}</h1>'.format(opt.title), width=1000)]] + [[el] for el in overview_plots]
+    gridplot_items = [[Div(text='<h1>{0}</h1>'.format(opt.title), width=1000)]] + [[el] for el in overview_panels]
     o = gridplot(gridplot_items)
     output_file('{}{}/overview.html'.format(opt.outputPath, opt.groupName), title='{} Overview'.format(opt.title))
     save(o)
@@ -211,6 +224,70 @@ def plot_eqrate(alltrigs, dt, binsize):
     fig.legend.location = 'top_left'
     
     return fig
+
+
+def plot_amplitude(dtT, ampT, dtR, ampR, binsize, mintime, type='Sum'):
+    
+    """
+    Creates subplot for amplitude of triggers and repeaters
+    
+    dtT: Array containing times of triggers
+    ampT: Array of amplitudes of triggers
+    dtR: Array containing times of repeaters
+    ampR: Array containing amplitudes of repeaters
+    binsize: Width (in days) of each time bin
+    mintime: Minimum time to be plotted
+    type: determines resample method, options are 'Sum' or 'Average' (default: 'Sum')
+    
+    """
+    #print('Plotting amplitudes...')   
+    #print('mintime : {}'.format(mintime))
+    
+    #from bokeh.models import Panel, Tabs
+ 
+    dt_offset = pd.Timedelta(binsize/2, 'days') # used to create the lines
+    
+    
+    dfR = pd.DataFrame({'time':matplotlib.dates.num2date(dtR[dtR>=mintime]), 'amp':ampR[dtR>=mintime]})
+    dfR = dfR.set_index('time')
+        
+    dfT = pd.DataFrame({'time':matplotlib.dates.num2date(dtT[dtT>=mintime]), 'amp':ampT[dtT>=mintime]})
+    dfT = dfT.set_index('time')
+    
+    if type=='Sum':
+        dfR = dfR.resample('1D').sum()
+        dfT = dfT.resample('1D').sum()
+    elif type=='Average':
+        dfR = dfR.resample('1D').mean()
+        dfT = dfT.resample('1D').mean()
+    
+    
+    #print(' ')
+    #print(dfR)
+    #print(' ')
+    #print(dfT)    
+
+
+    hr_days = 'Day Bin' if binsize>=1 else 'Hour Bin'
+    if binsize >= 1:
+        title = 'Amplitude: All Triggers vs. Repeaters by {:.1f} Day Bin ({})'.format(binsize, type)
+    else:
+        title = 'Amplitude: All Triggers vs. Repeaters by {:.1f} Hour Bin ({})'.format(binsize*24, type)
+   
+ 
+    # Plot data — * plotting of datetimes currently does not include offset
+    fig = bokehFigure(title=title)
+    fig.yaxis.axis_label = 'Amplitude'
+    fig.line(dfT.index+dt_offset, dfT['amp'], color='green',
+        legend_label='Triggers', line_width=2)    
+    fig.line(dfR.index+dt_offset, dfR['amp'], color='red',
+        legend_label='Repeaters')
+    fig.legend.location = 'top_left'
+    fig.legend.click_policy = 'hide'
+    fig.yaxis.formatter=NumeralTickFormatter(format="0 a")
+    
+    return fig
+
 
 
 def plot_fi(dt, fi):
